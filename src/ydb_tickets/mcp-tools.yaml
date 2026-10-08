@@ -1,0 +1,13 @@
+- name: create-ticket
+  description: Creates a new support ticket for a user.
+  actionType: function
+  functionId: d4ed6uhc3q9b2vh90lns
+  tag: $latest
+  input_json_schema: '{"type":"object","properties":{"user_id":{"type":"string"},"category":{"type":"string"},"text":{"type":"string"}},"required":["user_id","category","text"]}'
+
+- name: list-my-tickets
+  description: Returns support tickets for a user.
+  actionType: function
+  functionId: d4ed6uhc3q9b2vh90lns
+  tag: $latest
+  input_json_schema: '{"type":"object","properties":{"user_id":{"type":"string"}},"required":["user_id"]}'
