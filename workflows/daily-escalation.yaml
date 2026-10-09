@@ -1,0 +1,119 @@
+yawl: '0.2'
+defaultRetryPolicy:
+  errorList:
+    - ALL
+  errorListMode: INCLUDE
+start: find_overdue_tickets
+steps:
+  find_overdue_tickets:
+    databaseQuery:
+      connection:
+        type: YDB
+        host: ydb.serverless.yandexcloud.net
+        port: 2135
+        database: /ru-central1/b1gmn24mubbhgplrr92e/etn78gj7o7uhl4a0439m
+        ssl: true
+        iam: true
+      query: |
+        SELECT
+          id,
+          user_id,
+          category,
+          status,
+          text,
+          created_at
+        FROM tickets
+        WHERE status = "open"
+          AND created_at < CurrentUtcTimestamp() - Interval("PT24H")
+        ORDER BY created_at;
+      mode: QUERY
+      next: check_tickets
+  check_tickets:
+    switch:
+      choices:
+        - condition: (.ResultSets[0] | length) == 0
+          next: done
+      default:
+        next: step-foundationModelsCall649
+  done:
+    success: {}
+  step-foundationModelsCall649:
+    foundationModelsCall:
+      generate:
+        temperature: 0
+        maxTokens: 1000
+        messages:
+          messages:
+            - role: system
+              text: >-
+                Ты — помощник оператора службы технической поддержки.
+
+
+                Твоя задача — составлять краткую сводку по обращениям, которые
+                остаются открытыми более 24 часов.
+
+
+                Для каждого обращения укажи:
+
+                - идентификатор тикета;
+
+                - категорию;
+
+                - дату создания;
+
+                - краткое описание проблемы.
+
+
+                В начале сводки укажи общее количество просроченных обращений.
+
+
+                В конце перечисли обращения, требующие внимания оператора.
+
+
+                Пиши на русском языке, кратко и по существу.
+
+                Не придумывай факты, которых нет во входных данных.
+            - role: user
+              text: 'Составь дайджест по следующим обращениям: {{ .ResultSets }}'
+      modelUrl: gpt://b1g7h3jbiou1qgscdsce/yandexgpt-5-lite/latest
+      dataLoggingEnabled: true
+      output: '{{ {"step-foundationModelsCall649": .} }}'
+      catch: []
+      next: send_digest_email
+  send_digest_email:
+    httpCall:
+      url: https://functions.yandexcloud.net/d4en1l5u26f8f0ru1812
+      method: POST
+      body: '{{ .["step-foundationModelsCall649"].alternatives[0].message.text }}'
+      headers:
+        Content-Type: text/plain; charset=utf-8
+      next: step-databaseQuery848
+    description: ''
+  step-databaseQuery848:
+    databaseQuery:
+      connection:
+        type: YDB
+        host: ydb.serverless.yandexcloud.net
+        port: 2135
+        database: /ru-central1/b1gmn24mubbhgplrr92e/etn78gj7o7uhl4a0439m
+        ssl: true
+        iam: true
+      query: |
+        UPDATE tickets
+        SET status = "escalated"
+        WHERE status = "open"
+          AND created_at < CurrentUtcTimestamp() - Interval("PT24H")
+          AND id IN (
+            SELECT value
+            FROM AS_TABLE(
+              ListMap(
+                String::SplitToList(
+                  '{{ [.ResultSets[0][].id] | join(",") }}',
+                  ","
+                ),
+                ($id) -> (AsStruct($id AS value))
+              )
+            )
+          );
+      mode: QUERY
+      output: '{{ {"step-databaseQuery848": .} }}'
