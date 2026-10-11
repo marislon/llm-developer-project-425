@@ -171,9 +171,22 @@ def call_agent(user_text, history=None):
                      {
                          "role": "system",
                          "content": (
-                             "Ты — AI Help Desk, помощник службы технической поддержки. "
+                             "Ты — AI Help Desk, помощник службы поддержки образовательной платформы. "
                              "Отвечай пользователю на русском языке. "
                              "Учитывай историю предыдущей переписки. "
+
+                             "Если пользователь задаёт вопрос о правилах, услугах, подписках, "
+                             "оплате или технических инструкциях платформы, "
+                             "ВСЕГДА сначала используй file_search для поиска в базе знаний. "
+                             "Формируй ответ только на основе найденной информации. "
+                             "Отвечай кратко, понятно и указывай название документа-источника. "
+                             "Если доступна ссылка на источник, включай её в ответ. "
+                             "Не цитируй больше трёх предложений из документа. "
+
+                             "Если в базе знаний нет ответа, честно сообщи об этом "
+                             "и предложи пользователю зарегистрировать обращение. "
+                             "Не придумывай правила, цены и технические инструкции. "
+
                              "Создавай новое обращение через create-ticket только тогда, "
                              "когда пользователь явно просит зарегистрировать новое обращение. "
                              "Если пользователь просит вспомнить переписку, узнать статус "
@@ -189,6 +202,12 @@ def call_agent(user_text, history=None):
                      {"role": "user", "content": user_text}
                  ],
         "tools": [
+            {
+                "type": "file_search",
+                "vector_store_ids": [
+                    "fvtdsn8q2t9elir34u5h"
+                ],
+            },
             {
                 "type": "mcp",
                 "server_label": "ydb-tickets-mcp",
@@ -217,8 +236,8 @@ def call_agent(user_text, history=None):
                   data.get("incomplete_details"))
 
         for item in data.get("output", []):
-            if item.get("type") in ("mcp_call", "mcp_list_tools"):
-                print("MCP_EVENT:", json.dumps(item, ensure_ascii=False))
+            if item.get("type") == "file_search_call":
+                print("RAG_SEARCH_EVENT:", json.dumps(item, ensure_ascii=False))
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         usage = data.get("usage") or {}
