@@ -15,6 +15,7 @@ from email.parser import BytesParser
 from email.utils import parseaddr
 from pii_masking import mask_pii
 from user_identity import make_user_id
+from llm_input_guard import classify_with_llm, is_message_allowed
 
 IMAP_HOST = os.environ.get("IMAP_HOST", "imap.yandex.ru")
 IMAP_USER = os.environ.get("IMAP_USER")
@@ -305,7 +306,7 @@ def process_emails():
             return processed
 
         for num in message_numbers[0].split():
-            status, data = imap.fetch(num, "(RFC822)")
+            status, data = imap.fetch(num, "(BODY.PEEK[])")
 
             if status != "OK":
                 continue
@@ -319,6 +320,27 @@ def process_emails():
 
             if not sender_address or not user_text:
                 continue
+            try:
+                category = classify_with_llm(
+                    message=user_text,
+                    iam_token=get_iam_token(),
+                    folder_id=YC_FOLDER_ID,
+                )
+            except Exception:
+                category = "error"
+
+            print("INPUT_GUARD_CATEGORY:", category)
+
+            if not is_message_allowed(category):
+                # При техническом сбое оставляем письмо непрочитанным
+                # для повторной проверки при следующем запуске.
+                if category == "error":
+                    imap.store(num, "-FLAGS", "\\Seen")
+                else:
+                    # Подозрительные и посторонние сообщения не передаём агенту.
+                    imap.store(num, "+FLAGS", "\\Seen")
+                continue
+
             user_id = make_user_id(sender_address)
             history = get_message_history(user_id)
 
