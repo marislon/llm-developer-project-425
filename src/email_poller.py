@@ -13,6 +13,8 @@ from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 from email.utils import parseaddr
+from pii_masking import mask_pii
+from user_identity import make_user_id
 
 IMAP_HOST = os.environ.get("IMAP_HOST", "imap.yandex.ru")
 IMAP_USER = os.environ.get("IMAP_USER")
@@ -52,6 +54,7 @@ def save_message(
         tokens_out=0,
         latency_ms=0,
 ):
+    text = mask_pii(text)
     message_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
 
@@ -160,10 +163,7 @@ def call_agent(user_text, history=None):
 
     url = "https://ai.api.cloud.yandex.net/v1/responses"
 
-    print(
-        "REQUEST_HISTORY:",
-        json.dumps(history or [], ensure_ascii=False)
-    )
+    print("REQUEST_HISTORY_COUNT:", len(history or []))
 
     payload = {
         "model": f"gpt://{YC_FOLDER_ID}/yandexgpt/latest",
@@ -231,13 +231,14 @@ def call_agent(user_text, history=None):
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             data = json.loads(response.read().decode("utf-8"))
-            print("RESPONSE_OUTPUT:", json.dumps(data.get("output", []), ensure_ascii=False))
-            print("RESPONSE_STATUS:", data.get("status"), "ERROR:", data.get("error"), "INCOMPLETE:",
-                  data.get("incomplete_details"))
+            print("RESPONSE_OUTPUT_COUNT:", len(data.get("output", [])))
+            print("RESPONSE_STATUS:", data.get("status"),
+                  "HAS_ERROR:", data.get("error") is not None,
+                  "IS_INCOMPLETE:", data.get("incomplete_details") is not None)
 
         for item in data.get("output", []):
             if item.get("type") == "file_search_call":
-                print("RAG_SEARCH_EVENT:", json.dumps(item, ensure_ascii=False))
+                print("RAG_SEARCH_EVENT:", item.get("type"))
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         usage = data.get("usage") or {}
@@ -318,24 +319,25 @@ def process_emails():
 
             if not sender_address or not user_text:
                 continue
-            history = get_message_history(sender_address)
+            user_id = make_user_id(sender_address)
+            history = get_message_history(user_id)
 
             agent_result = call_agent(
-                f"Идентификатор пользователя (user_id): {sender_address}\n"
+                f"Идентификатор пользователя (user_id): {user_id}\n"
                 f"Сообщение пользователя: {user_text}",
                 history=history,
             )
             agent_reply = agent_result["text"]
 
             save_message(
-                user_id=sender_address,
+                user_id=user_id,
                 role="user",
                 text=user_text,
                 ticket_id=agent_result["ticket_id"],
             )
 
             save_message(
-                user_id=sender_address,
+                user_id=user_id,
                 role="assistant",
                 text=agent_reply,
                 ticket_id=agent_result["ticket_id"],
@@ -367,7 +369,7 @@ def handle(event, context):
         }
 
     except Exception as error:
-        print(f"email-poller error: {error}")
+        print("EMAIL_POLLER_ERROR_TYPE:", type(error).__name__)
 
         return {
             "processed": 0,

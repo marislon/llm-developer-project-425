@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 import ydb
-
+from pii_masking import mask_pii
 
 YDB_ENDPOINT = os.environ.get("YDB_ENDPOINT")
 YDB_DATABASE = os.environ.get("YDB_DATABASE")
@@ -63,7 +63,7 @@ def create_ticket(user_id, category, text):
                 "$user_id": user_id,
                 "$category": category,
                 "$status": "open",
-                "$text": text,
+                "$text": mask_pii(text),
                 "$created_at": now,
                 "$updated_at": now,
             },
