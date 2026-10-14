@@ -1,0 +1,31 @@
+yawl: "0.1"
+
+start: find_overdue_tickets
+
+steps:
+  find_overdue_tickets:
+    databaseQuery:
+      connection:
+        type: YDB
+        host: ydb.serverless.yandexcloud.net
+        port: 2135
+        database: /ru-central1/b1gmn24mubbhgplrr92e/etn78gj7o7uhl4a0439m
+        ssl: true
+        iam: true
+      query: |
+        SELECT
+          id,
+          user_id,
+          category,
+          status,
+          text,
+          created_at
+        FROM tickets
+        WHERE status = "open"
+          AND created_at < CurrentUtcTimestamp() - Interval("PT24H")
+        ORDER BY created_at;
+      mode: QUERY
+      next: done
+
+  done:
+    success: {}
