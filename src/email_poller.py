@@ -70,7 +70,7 @@ def save_message(
                 DECLARE $tokens_out AS Uint64;
                 DECLARE $latency_ms AS Uint32;
                 DECLARE $created_at AS Timestamp;
-            
+
                 UPSERT INTO messages (
                     id, user_id, ticket_id, role, text,
                     model, tokens_in, tokens_out, latency_ms, created_at
@@ -102,6 +102,7 @@ def save_message(
 
     pool.retry_operation_sync(execute)
 
+
 def get_message_history(user_id):
     query = """
     DECLARE $user_id AS Utf8;
@@ -132,13 +133,32 @@ def get_message_history(user_id):
 
     return history
 
+
 def get_email_text(msg):
-    body = msg.get_body(preferencelist=("plain",))
+    body = msg.get_body(preferencelist=("plain", "html"))
 
     if body is None:
         return ""
 
-    return body.get_content().strip()
+    content = body.get_content()
+
+    if body.get_content_type() == "text/html":
+        from html import unescape
+        from html.parser import HTMLParser
+
+        class TextExtractor(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.parts = []
+
+            def handle_data(self, data):
+                self.parts.append(data)
+
+        parser = TextExtractor()
+        parser.feed(content)
+        content = unescape(" ".join(parser.parts))
+
+    return content.strip()
 
 
 def get_iam_token():
@@ -163,8 +183,6 @@ def call_agent(user_text, history=None):
     start_time = time.perf_counter()
 
     url = "https://ai.api.cloud.yandex.net/v1/responses"
-
-    print("REQUEST_HISTORY_COUNT:", len(history or []))
 
     payload = {
         "model": f"gpt://{YC_FOLDER_ID}/yandexgpt/latest",
@@ -232,14 +250,6 @@ def call_agent(user_text, history=None):
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             data = json.loads(response.read().decode("utf-8"))
-            print("RESPONSE_OUTPUT_COUNT:", len(data.get("output", [])))
-            print("RESPONSE_STATUS:", data.get("status"),
-                  "HAS_ERROR:", data.get("error") is not None,
-                  "IS_INCOMPLETE:", data.get("incomplete_details") is not None)
-
-        for item in data.get("output", []):
-            if item.get("type") == "file_search_call":
-                print("RAG_SEARCH_EVENT:", item.get("type"))
 
         latency_ms = int((time.perf_counter() - start_time) * 1000)
         usage = data.get("usage") or {}
@@ -293,6 +303,36 @@ def send_email(to_address, subject, body):
         smtp.send_message(message)
 
 
+import re
+
+
+def remove_quoted_reply(text):
+    """Отделяет новое сообщение от цитируемой переписки."""
+
+    # Типичный разделитель цитаты Gmail
+    text = re.split(
+        r"(?im)^\s*On .+ wrote:\s*$",
+        text,
+        maxsplit=1,
+    )[0]
+
+    # Разделитель в русскоязычных письмах
+    text = re.split(
+        r"(?im)^\s*В .+ писал[аи]?:\s*$",
+        text,
+        maxsplit=1,
+    )[0]
+
+    # Цитируемые строки
+    lines = []
+    for line in text.splitlines():
+        if line.lstrip().startswith(">"):
+            break
+        lines.append(line)
+
+    return "\n".join(lines).strip()
+
+
 def process_emails():
     processed = 0
 
@@ -316,7 +356,8 @@ def process_emails():
 
             sender_name, sender_address = parseaddr(msg["From"])
             subject = msg["Subject"] or "Без темы"
-            user_text = get_email_text(msg)
+            user_text = remove_quoted_reply(get_email_text(msg))
+            user_text = mask_pii(user_text)
 
             if not sender_address or not user_text:
                 continue
@@ -328,8 +369,6 @@ def process_emails():
                 )
             except Exception:
                 category = "error"
-
-            print("INPUT_GUARD_CATEGORY:", category)
 
             if not is_message_allowed(category):
                 # При техническом сбое оставляем письмо непрочитанным
