@@ -123,11 +123,9 @@ cd llm-developer-project-425
 ``` dotenv
 IMAP_HOST=
 IMAP_USER=
-IMAP_PASSWORD=
 SMTP_HOST=
 SMTP_PORT=
 SMTP_USER=
-SMTP_PASSWORD=
 HELPDESK_MAILBOX=
 YC_FOLDER_ID=
 AGENT_ID=
@@ -136,7 +134,7 @@ YDB_ENDPOINT=
 YDB_DATABASE=
 USER_ID_SECRET=
 ```
-
+Пароли почтового приложения задаются через переменные окружения IMAP_PASSWORD и SMTP_PASSWORD в локальном файле .env. Не добавляйте значения паролей в GitHub.
 Пароли почты, параметры YDB и секрет для псевдонимизации передаются
 облачной функции через **Yandex Lockbox**. Не публикуйте реальные
 значения в GitHub. Локальный `.env` должен оставаться вне репозитория.
